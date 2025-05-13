@@ -4,6 +4,7 @@ from panda3d.core import *
 from direct.gui.OnscreenText import OnscreenText
 import random
 import math
+import os
 import numpy as np
 
 class imeCraft(ShowBase):
@@ -28,12 +29,8 @@ class imeCraft(ShowBase):
         self.directional_light_np = self.render.attachNewNode(directional_light)
         self.render.setLight(self.directional_light_np)
 
-        print("Creating procedural textures...")
-        self.textures = {
-            'grass': self.create_procedural_texture('grass'),
-            'dirt': self.create_procedural_texture('dirt'),
-            'stone': self.create_procedural_texture('stone')
-        }
+        print("Loading textures")
+        self.textures = self.load_textures()
 
         self.block_types = {
             0: {'name': 'air', 'texture': None, 'solid': False},
@@ -94,6 +91,76 @@ class imeCraft(ShowBase):
 
         self.setup_block_interaction()
 
+        self.render.setShaderAuto()
+        self.setup_lighting()
+
+        self.taskMgr.add(self.update_day_night_cycle, "update_day_night_cycle") 
+
+    def update_day_night_cycle(self, task):
+        
+        time_of_day = (task.time % 240) / 240.0
+        
+        angle = time_of_day * 2 * math.pi
+        x = math.sin(angle)
+        z = -math.cos(angle)
+        
+        self.sun_light.setDirection(Vec3(x, 0.5, z).normalize())
+        
+        if 0.25 < time_of_day < 0.75:  # Daytime
+            intensity = min(1.0, 1.0 - abs(time_of_day - 0.5) * 2.0)
+            self.sun_light.setColor((intensity, intensity * 0.98, intensity * 0.9, 1))
+            self.ambient_light.setColor((0.3 * intensity, 0.35 * intensity, 0.45 * intensity, 1))
+        else:  # Night time
+            night_progress = time_of_day if time_of_day < 0.25 else (time_of_day - 0.75) / 0.25
+            night_intensity = 0.15
+            self.sun_light.setColor((night_intensity * 0.8, night_intensity * 0.8, night_intensity, 1))
+            self.ambient_light.setColor((night_intensity * 0.5, night_intensity * 0.5, night_intensity * 0.8, 1))
+        
+        return Task.cont
+
+    def setup_lighting(self):
+        self.sun_light = DirectionalLight("sun_light")
+        self.sun_light.setColor((1.0, 0.98, 0.95, 1))
+        self.sun_light.setDirection(Vec3(-0.5, -0.5, -0.7).normalize())
+        self.sun_light_np = self.render.attachNewNode(self.sun_light)
+        self.render.setLight(self.sun_light_np)
+        
+        self.ambient_light = AmbientLight("ambient_light")
+        self.ambient_light.setColor((0.4, 0.4, 0.45, 1))  
+        self.ambient_light_np = self.render.attachNewNode(self.ambient_light)
+        self.render.setLight(self.ambient_light_np)
+        
+        self.fill_light = DirectionalLight("fill_light")
+        self.fill_light.setColor((0.3, 0.3, 0.3, 1))  
+        self.fill_light.setDirection(Vec3(0.5, 0.5, 0.7).normalize()) 
+        self.fill_light_np = self.render.attachNewNode(self.fill_light)
+        self.render.setLight(self.fill_light_np)
+        
+        if hasattr(self, 'sun_light'):
+            self.sun_light.setShadowCaster(True, 2048, 2048)
+            lens = self.sun_light.getLens()
+            lens.setFilmSize(60)
+            lens.setNearFar(10, 100)
+
+    def load_textures(self):
+        textures = {}
+        texture_paths = {
+            'grass': 'grass.png',
+            'dirt': 'dirt.png',
+            'stone': 'stone.png'
+        }
+
+        for name, path in texture_paths.items():
+            tex = Texture(name)
+            if os.path.exists(path):
+                print(f"Loading texture: {path}")
+                tex = self.loader.loadTexture(path)
+            else:
+                print(f"Warning: Texture file {path} not found, creating procedural texture.")
+                tex = self.create_procedural_texture(name)
+            textures[name] = tex
+        return textures
+
     def create_procedural_texture(self, texture_type):
 
         texture = Texture()
@@ -145,7 +212,6 @@ class imeCraft(ShowBase):
         return crosshair
 
     def setup_block_interaction(self):
-        """Set up block interaction controls and feedback"""
 
         self.interaction_distance = 8.0  
 
@@ -162,7 +228,6 @@ class imeCraft(ShowBase):
         self.show_selected_block_info()
 
     def show_selected_block_info(self):
-        """Display the currently selected block type on screen"""
 
         if hasattr(self, 'block_info_text'):
             self.block_info_text.removeNode()
@@ -178,13 +243,11 @@ class imeCraft(ShowBase):
         )
 
     def set_selected_block(self, block_type):
-        """Select a block type for placement"""
         self.selected_block_type = block_type
         self.show_selected_block_info()
         print(f"Selected block: {self.block_types[block_type]['name']}")
 
     def remove_block(self):
-        """Remove the block player is looking at"""
         result = self.ray_test()
         if result:
             hit_pos, hit_normal, hit_block_pos = result
@@ -198,7 +261,6 @@ class imeCraft(ShowBase):
                 print(f"Removed {self.block_types[block_type]['name']} block at ({block_x}, {block_y}, {block_z})")
 
     def place_block(self):
-        """Place a block adjacent to where player is looking"""
 
         current_time = globalClock.getFrameTime()
         if current_time - self.last_place_time < self.place_cooldown:
@@ -232,7 +294,6 @@ class imeCraft(ShowBase):
                     print("Position already occupied by another block")
 
     def ray_test(self):
-        """Cast a ray from player position along view direction to find block interaction point"""
         max_distance = self.interaction_distance
         origin = self.camera.getPos()
         direction = self.camera.getMat().getRow3(1).normalized()  
@@ -320,7 +381,6 @@ class imeCraft(ShowBase):
         return Task.cont
 
     def setup_mouse(self):
-        """Set up mouse for first-person control"""
 
         self.props.setCursorHidden(True)
         self.props.setMouseMode(WindowProperties.M_relative)
@@ -334,7 +394,6 @@ class imeCraft(ShowBase):
         self.player_pitch = 0
 
     def center_mouse(self):
-        """Center the mouse cursor in the window"""
         props = self.win.getProperties()
         center_x = props.getXSize() // 2
         center_y = props.getYSize() // 2
@@ -569,22 +628,21 @@ class imeCraft(ShowBase):
             normal_writer = GeomVertexWriter(vertex_data, 'normal')
             texcoord_writer = GeomVertexWriter(vertex_data, 'texcoord')
 
-            normals = [
-                (1, 0, 0),   
-                (-1, 0, 0),  
-                (0, 1, 0),   
-                (0, -1, 0),  
-                (0, 0, 1),   
-                (0, 0, -1)   
-            ]
+            normals_map = {
+                0: (1, 0, 0), 
+                1: (-1, 0, 0),  
+                2: (0, 1, 0),   
+                3: (0, -1, 0),  
+                4: (0, 0, 1),
+                5: (0, 0, -1)
+            }
 
             for i in range(len(vertices)):
                 vertex_writer.addData3f(*vertices[i])
-
                 face_index = i // 4
                 face_type = face_index % 6
-                normal_writer.addData3f(*normals[face_type])
-
+                normal_writer.addData3f(*normals_map[face_type])
+                
                 texcoord_writer.addData2f(*uvs[i])
 
             for block_type, data in block_types_data.items():
@@ -601,20 +659,42 @@ class imeCraft(ShowBase):
                 node.addGeom(geom)
 
                 np = chunk['node'].attachNewNode(node)
-                np.setPos(cx * self.chunk_size, cy * self.chunk_size, 0)  
+                np.setPos(cx * self.chunk_size, cy * self.chunk_size, 0)
+                np.setTwoSided(True)
+                np.setAttrib(CullFaceAttrib.make(CullFaceAttrib.MCullNone))
+                np.setShaderAuto()
+                np.setLightOff()
 
                 texture = self.block_types[block_type]['texture']
                 if texture:
                     np.setTexture(texture)
+
+                material = Material()
+                material.setAmbient((0.7, 0.7, 0.7, 1))  
+                material.setDiffuse((0.9, 0.9, 0.9, 1))   
+                material.setEmission((0.1, 0.1, 0.1, 1))  
+                material.setShininess(0.0) 
+                material.setSpecular((0, 0, 0, 1))  
+                np.setMaterial(material)
 
                 chunk['meshes'][block_type] = np
 
         print(f"Mesh update complete for chunk ({cx},{cy})")
 
     def add_face_vertices(self, vertices, indices, uvs, x, y, z, face):
-
         vertex_count = len(vertices)
-
+    
+        face_normals = {
+            "right":  (1, 0, 0),
+            "left":   (-1, 0, 0),
+            "front":  (0, 1, 0), 
+            "back":   (0, -1, 0),
+            "top":    (0, 0, 1),
+            "bottom": (0, 0, -1)
+        }
+        
+        normal = face_normals[face]
+        
         if face == "right":
             vertices.extend([
                 (x + 1, y, z),
@@ -624,37 +704,37 @@ class imeCraft(ShowBase):
             ])
         elif face == "left":
             vertices.extend([
-                (x, y + 1, z),
                 (x, y, z),
-                (x, y, z + 1),
-                (x, y + 1, z + 1)
+                (x, y + 1, z),
+                (x, y + 1, z + 1),
+                (x, y, z + 1)
             ])
         elif face == "front":
             vertices.extend([
-                (x + 1, y + 1, z),
                 (x, y + 1, z),
-                (x, y + 1, z + 1),
-                (x + 1, y + 1, z + 1)
+                (x + 1, y + 1, z),
+                (x + 1, y + 1, z + 1),
+                (x, y + 1, z + 1)
             ])
         elif face == "back":
             vertices.extend([
-                (x, y, z),
                 (x + 1, y, z),
-                (x + 1, y, z + 1),
-                (x, y, z + 1)
+                (x, y, z),
+                (x, y, z + 1),
+                (x + 1, y, z + 1)
             ])
         elif face == "top":
             vertices.extend([
+                (x, y, z + 1),
                 (x + 1, y, z + 1),
                 (x + 1, y + 1, z + 1),
-                (x, y + 1, z + 1),
-                (x, y, z + 1)
+                (x, y + 1, z + 1)
             ])
         elif face == "bottom":
             vertices.extend([
-                (x + 1, y + 1, z),
-                (x + 1, y, z),
                 (x, y, z),
+                (x + 1, y, z),
+                (x + 1, y + 1, z),
                 (x, y + 1, z)
             ])
 
